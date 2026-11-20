@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { Home, Add, Details, Edit }
+private enum class Screen { Home, PickService, Add, Details, Edit }
 private fun won(value: Long): String = String.format(Locale.KOREA, "%,d원", value)
 
 @Composable
@@ -37,6 +37,7 @@ private fun SubscriptionApp(viewModel: SubscriptionViewModel) {
     val subscriptions by viewModel.subscriptions.collectAsStateWithLifecycle()
     val saveState by viewModel.saveState.collectAsStateWithLifecycle()
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+    var selectedServiceName by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedId by rememberSaveable { mutableLongStateOf(0L) }
     val selected = subscriptions?.find { it.id == selectedId }
     val saving = saveState == SaveState.Saving
@@ -50,7 +51,11 @@ private fun SubscriptionApp(viewModel: SubscriptionViewModel) {
     val back: () -> Unit = {
         if (!saving) {
             viewModel.clearSaveState()
-            screen = if (screen == Screen.Edit) Screen.Details else Screen.Home
+            screen = when (screen) {
+                Screen.Add -> Screen.PickService
+                Screen.Edit -> Screen.Details
+                else -> Screen.Home
+            }
         }
     }
 
@@ -75,13 +80,22 @@ private fun SubscriptionApp(viewModel: SubscriptionViewModel) {
                             if (entries == null) {
                                 Text("구독을 불러오는 중…")
                             } else {
-                                Home(entries, { screen = Screen.Add }) {
+                                Home(entries, { screen = Screen.PickService }) {
                                     selectedId = it
                                     screen = Screen.Details
                                 }
                             }
                         }
-                        Screen.Add -> SubscriptionForm(null, saveState, viewModel::save)
+                        Screen.PickService -> ServicePicker { service ->
+                            selectedServiceName = service?.name
+                            screen = Screen.Add
+                        }
+                        Screen.Add -> SubscriptionForm(
+                            initial = null,
+                            saveState = saveState,
+                            onSave = viewModel::save,
+                            preset = findServicePreset(selectedServiceName)
+                        )
                         Screen.Details -> if (selected == null) {
                             Text("구독을 불러오는 중…")
                         } else {
@@ -150,13 +164,14 @@ private fun Details(item: SubscriptionFields, onEdit: () -> Unit) {
 private fun SubscriptionForm(
     initial: Subscription?,
     saveState: SaveState,
-    onSave: (Long?, SubscriptionFields) -> Unit
+    onSave: (Long?, SubscriptionFields) -> Unit,
+    preset: ServicePreset? = null
 ) {
-    var name by rememberSaveable { mutableStateOf(initial?.fields?.name.orEmpty()) }
+    var name by rememberSaveable { mutableStateOf((initial?.fields?.name ?: preset?.name).orEmpty()) }
     var price by rememberSaveable { mutableStateOf(initial?.fields?.price?.toString().orEmpty()) }
     var cycle by rememberSaveable { mutableStateOf(initial?.fields?.cycle ?: Cycle.Monthly) }
     var date by rememberSaveable { mutableStateOf(initial?.fields?.date?.toString().orEmpty()) }
-    var category by rememberSaveable { mutableStateOf(initial?.fields?.category.orEmpty()) }
+    var category by rememberSaveable { mutableStateOf((initial?.fields?.category ?: preset?.category).orEmpty()) }
     var memo by rememberSaveable { mutableStateOf(initial?.fields?.memo.orEmpty()) }
     var active by rememberSaveable { mutableStateOf(initial?.fields?.active ?: true) }
     var submitted by rememberSaveable { mutableStateOf(false) }
