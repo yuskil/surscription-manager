@@ -1,7 +1,10 @@
 package com.yuskil.subscriptionmanager
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import java.util.Locale
 
 internal data class ServicePreset(
@@ -75,6 +79,7 @@ internal fun ServicePicker(
                 onClick = { if (isYouTube) showYouTubePrices = true else onSelect(preset) },
                 modifier = Modifier.fillMaxWidth()
             ) {
+                if (isYouTube) YouTubeButtonIcon()
                 Text(if (isYouTube) YOUTUBE else preset.optionLabel(includeService = true))
             }
         }
@@ -96,6 +101,7 @@ internal fun ServicePicker(
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            YouTubeButtonIcon()
                             Text(when (preset.plan) {
                                 "" -> "직접 입력"
                                 "금액 지정" -> formattedPrice(requireNotNull(preset.price), "KRW") + " · 금액 지정"
@@ -110,6 +116,15 @@ internal fun ServicePicker(
             }
         )
     }
+}
+
+@Composable
+private fun YouTubeButtonIcon() {
+    Image(
+        painter = painterResource(R.drawable.ic_youtube_play),
+        contentDescription = null
+    )
+    Spacer(Modifier.width(8.dp))
 }
 
 private fun ServicePreset.optionLabel(includeService: Boolean): String =
