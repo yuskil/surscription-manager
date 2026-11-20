@@ -33,7 +33,14 @@ internal class SubscriptionViewModel(application: Application) : AndroidViewMode
         mutableSaveState.value = SaveState.Saving
         viewModelScope.launch {
             mutableSaveState.value = try {
-                repository.save(id, fields)?.let { SaveState.Saved(it) } ?: SaveState.Failed
+                repository.save(id, fields)?.let { savedId ->
+                    try {
+                        scheduleReminder(getApplication(), savedId, fields)
+                    } catch (error: RuntimeException) {
+                        Log.e("SubscriptionViewModel", "Failed to schedule reminder", error)
+                    }
+                    SaveState.Saved(savedId)
+                } ?: SaveState.Failed
             } catch (error: SQLiteException) {
                 Log.e("SubscriptionViewModel", "Failed to save subscription", error)
                 SaveState.Failed
