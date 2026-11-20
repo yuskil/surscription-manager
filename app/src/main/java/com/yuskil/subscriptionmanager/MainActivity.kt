@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,51 +16,42 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private val subscriptions: SubscriptionViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { SubscriptionApp() } }
+        setContent { MaterialTheme { SubscriptionApp(subscriptions) } }
     }
 }
 
 private enum class Screen { Home, Add, Details, Edit }
-private enum class Cycle(val label: String, val paymentsPerYear: Int) {
-    Monthly("월간", 12), Quarterly("분기", 4), Yearly("연간", 1)
-}
-
-private data class Subscription(
-    val id: Int,
-    val name: String,
-    val price: Long,
-    val cycle: Cycle,
-    val date: LocalDate,
-    val category: String = "",
-    val memo: String = "",
-    val active: Boolean = true
-)
-
-private fun sampleSubscriptions(): List<Subscription> {
-    val today = LocalDate.now()
-    return listOf(
-        Subscription(1, "동영상 스트리밍", 14900, Cycle.Monthly, today.plusDays(3), "영상"),
-        Subscription(2, "클라우드 저장 공간", 9900, Cycle.Quarterly, today.plusDays(10), "생산성"),
-        Subscription(3, "독서 구독", 59000, Cycle.Yearly, today.plusDays(21), "도서")
-    )
-}
-
 private fun won(value: Long): String = String.format(Locale.KOREA, "%,d원", value)
 
 @Composable
-private fun SubscriptionApp() {
-    var subscriptions by remember { mutableStateOf(sampleSubscriptions()) }
-    var screen by remember { mutableStateOf(Screen.Home) }
-    var selectedId by remember { mutableIntStateOf(0) }
-    val selected = subscriptions.find { it.id == selectedId }
+private fun SubscriptionApp(viewModel: SubscriptionViewModel) {
+    val subscriptions by viewModel.subscriptions.collectAsStateWithLifecycle()
+    val saveState by viewModel.saveState.collectAsStateWithLifecycle()
+    var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+    var selectedId by rememberSaveable { mutableLongStateOf(0L) }
+    val selected = subscriptions?.find { it.id == selectedId }
+    val saving = saveState == SaveState.Saving
+
+    LaunchedEffect(saveState) {
+        val result = saveState as? SaveState.Saved ?: return@LaunchedEffect
+        selectedId = result.id
+        screen = Screen.Details
+        viewModel.clearSaveState()
+    }
     val back: () -> Unit = {
-        screen = if (screen == Screen.Edit) Screen.Details else Screen.Home
+        if (!saving) {
+            viewModel.clearSaveState()
+            screen = if (screen == Screen.Edit) Screen.Details else Screen.Home
+        }
     }
 
     BackHandler(enabled = screen != Screen.Home, onBack = back)
@@ -74,26 +66,31 @@ private fun SubscriptionApp() {
                         .verticalScroll(rememberScrollState()).padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (screen != Screen.Home) TextButton(onClick = back) { Text("뒤로") }
+                    if (screen != Screen.Home) {
+                        TextButton(onClick = back, enabled = !saving) { Text("뒤로") }
+                    }
                     when (screen) {
-                        Screen.Home -> Home(subscriptions, { screen = Screen.Add }) {
-                            selectedId = it
-                            screen = Screen.Details
-                        }
-                        Screen.Add -> SubscriptionForm(initial = null) { entry ->
-                            val id = (subscriptions.maxOfOrNull { it.id } ?: 0) + 1
-                            subscriptions = subscriptions + entry.copy(id = id)
-                            selectedId = id
-                            screen = Screen.Details
-                        }
-                        Screen.Details -> if (selected != null) {
-                            Details(selected) { screen = Screen.Edit }
-                        }
-                        Screen.Edit -> if (selected != null) {
-                            SubscriptionForm(selected) { entry ->
-                                subscriptions = subscriptions.map { if (it.id == entry.id) entry else it }
-                                screen = Screen.Details
+                        Screen.Home -> {
+                            val entries = subscriptions
+                            if (entries == null) {
+                                Text("구독을 불러오는 중…")
+                            } else {
+                                Home(entries, { screen = Screen.Add }) {
+                                    selectedId = it
+                                    screen = Screen.Details
+                                }
                             }
+                        }
+                        Screen.Add -> SubscriptionForm(null, saveState, viewModel::save)
+                        Screen.Details -> if (selected == null) {
+                            Text("구독을 불러오는 중…")
+                        } else {
+                            Details(selected.fields) { screen = Screen.Edit }
+                        }
+                        Screen.Edit -> if (selected == null) {
+                            Text("구독을 불러오는 중…")
+                        } else {
+                            SubscriptionForm(selected, saveState, viewModel::save)
                         }
                     }
                 }
@@ -103,32 +100,31 @@ private fun SubscriptionApp() {
 }
 
 @Composable
-private fun Home(subscriptions: List<Subscription>, onAdd: () -> Unit, onSelect: (Int) -> Unit) {
-    val sorted = subscriptions.sortedBy { it.date }
-    val active = sorted.filter { it.active }
-    val annual = active.sumOf { it.price * it.cycle.paymentsPerYear }
-    val upcoming = active.filter { !it.date.isBefore(LocalDate.now()) }.take(3)
+private fun Home(subscriptions: List<Subscription>, onAdd: () -> Unit, onSelect: (Long) -> Unit) {
+    val active = subscriptions.filter { it.fields.active }
+    val annual = active.sumOf { it.fields.price * it.fields.cycle.paymentsPerYear }
+    val upcoming = active.filter { !it.fields.date.isBefore(LocalDate.now()) }.take(3)
 
     Text("구독 매니저", style = MaterialTheme.typography.headlineLarge)
-    Text("샘플 데이터로 체험 중입니다. 앱을 종료하면 변경 내용이 초기화됩니다.")
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("월평균 환산 지출")
             Text(won((annual + 6) / 12), style = MaterialTheme.typography.headlineMedium)
             Text("연간 환산 지출 · " + won(annual))
-            Text("활성 구독 기준", style = MaterialTheme.typography.bodySmall)
+            Text("활성 구독 기준 · 결제 주기를 월 단위로 환산", style = MaterialTheme.typography.bodySmall)
         }
     }
     Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text("구독 추가") }
     Text("예정된 결제", style = MaterialTheme.typography.titleLarge)
     if (upcoming.isEmpty()) Text("예정된 결제가 없습니다.")
-    upcoming.forEach { item ->
+    upcoming.forEach { (_, item) ->
         Text(item.date.toString() + " · " + item.name + " · " + won(item.price))
     }
 
     Text("구독 목록", style = MaterialTheme.typography.titleLarge)
-    sorted.forEach { item ->
-        OutlinedCard(onClick = { onSelect(item.id) }, modifier = Modifier.fillMaxWidth()) {
+    if (subscriptions.isEmpty()) Text("구독 추가를 눌러 첫 구독을 등록하세요.")
+    subscriptions.forEach { (id, item) ->
+        OutlinedCard(onClick = { onSelect(id) }, modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium)
                 Text(won(item.price) + " · " + item.cycle.label)
@@ -139,7 +135,7 @@ private fun Home(subscriptions: List<Subscription>, onAdd: () -> Unit, onSelect:
 }
 
 @Composable
-private fun Details(item: Subscription, onEdit: () -> Unit) {
+private fun Details(item: SubscriptionFields, onEdit: () -> Unit) {
     Text(item.name, style = MaterialTheme.typography.headlineMedium)
     Text("결제 금액 · " + won(item.price))
     Text("결제 주기 · " + item.cycle.label)
@@ -151,14 +147,18 @@ private fun Details(item: Subscription, onEdit: () -> Unit) {
 }
 
 @Composable
-private fun SubscriptionForm(initial: Subscription?, onSave: (Subscription) -> Unit) {
-    var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
-    var price by rememberSaveable { mutableStateOf(initial?.price?.toString().orEmpty()) }
-    var cycle by rememberSaveable { mutableStateOf(initial?.cycle ?: Cycle.Monthly) }
-    var date by rememberSaveable { mutableStateOf(initial?.date?.toString().orEmpty()) }
-    var category by rememberSaveable { mutableStateOf(initial?.category.orEmpty()) }
-    var memo by rememberSaveable { mutableStateOf(initial?.memo.orEmpty()) }
-    var active by rememberSaveable { mutableStateOf(initial?.active ?: true) }
+private fun SubscriptionForm(
+    initial: Subscription?,
+    saveState: SaveState,
+    onSave: (Long?, SubscriptionFields) -> Unit
+) {
+    var name by rememberSaveable { mutableStateOf(initial?.fields?.name.orEmpty()) }
+    var price by rememberSaveable { mutableStateOf(initial?.fields?.price?.toString().orEmpty()) }
+    var cycle by rememberSaveable { mutableStateOf(initial?.fields?.cycle ?: Cycle.Monthly) }
+    var date by rememberSaveable { mutableStateOf(initial?.fields?.date?.toString().orEmpty()) }
+    var category by rememberSaveable { mutableStateOf(initial?.fields?.category.orEmpty()) }
+    var memo by rememberSaveable { mutableStateOf(initial?.fields?.memo.orEmpty()) }
+    var active by rememberSaveable { mutableStateOf(initial?.fields?.active ?: true) }
     var submitted by rememberSaveable { mutableStateOf(false) }
     val amount = price.trim().toLongOrNull()?.takeIf { it in 1..999_999_999 }
     val billingDate = runCatching { LocalDate.parse(date.trim()) }.getOrNull()
@@ -191,10 +191,20 @@ private fun SubscriptionForm(initial: Subscription?, onSave: (Subscription) -> U
         Text("서비스명, 1~999,999,999원 사이의 금액, 올바른 결제일을 입력하세요.",
             color = MaterialTheme.colorScheme.error)
     }
-    Button(onClick = {
-        submitted = true
-        if (name.isNotBlank() && amount != null && billingDate != null) {
-            onSave(Subscription(initial?.id ?: 0, name.trim(), amount, cycle, billingDate, category.trim(), memo.trim(), active))
-        }
-    }, modifier = Modifier.fillMaxWidth()) { Text("저장") }
+    if (saveState == SaveState.Failed) {
+        Text("저장하지 못했습니다. 다시 시도하세요.", color = MaterialTheme.colorScheme.error)
+    }
+    Button(
+        onClick = {
+            submitted = true
+            if (name.isNotBlank() && amount != null && billingDate != null) {
+                onSave(
+                    initial?.id,
+                    SubscriptionFields(name.trim(), amount, cycle, billingDate, category.trim(), memo.trim(), active)
+                )
+            }
+        },
+        enabled = saveState == SaveState.Idle || saveState == SaveState.Failed,
+        modifier = Modifier.fillMaxWidth()
+    ) { Text(if (saveState == SaveState.Saving) "저장 중…" else "저장") }
 }
