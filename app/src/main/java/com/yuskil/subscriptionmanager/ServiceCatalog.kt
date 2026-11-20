@@ -3,6 +3,8 @@ package com.yuskil.subscriptionmanager
 // 한국 신규 가입 공개 자료 기준, 2026-11-20.
 internal val serviceCatalog = buildList {
     service("유튜브", "영상", "YouTube|유튜브 프리미엄") {
+        plan("", "", null)
+        plan("금액 지정", "", 11900)
         plan("프리미엄", "웹·Android", 14900)
         plan("프리미엄 라이트", "웹·Android", 8500)
         plan("뮤직 프리미엄", "웹·Android", 11990)
